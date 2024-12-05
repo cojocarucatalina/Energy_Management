@@ -1,0 +1,162 @@
+services:
+  user_management:
+    image: user10
+    build:
+      context: ./spring-demo-user
+      dockerfile: ./Dockerfile
+    environment:
+      DB_IP: user_management_db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: root
+      DB_DBNAME: user
+    depends_on:
+      - user_management_db
+    restart: always
+    networks:
+      - application_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.user.rule=Host(`user.localhost`) || PathPrefix(`/user`)"
+      - "traefik.http.middlewares.user-strip.stripprefix.prefixes=/user"
+      - "traefik.http.services.user.loadbalancer.server.port=8083"
+    deploy:
+      replicas: 2
+
+  device_management:
+    image: device10
+    build:
+      context: ./spring-demo-device
+      dockerfile: ./Dockerfile
+    environment:
+      DB_IP: device_management_db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: root
+      DB_DBNAME: device
+    depends_on:
+      - device_management_db
+    restart: always
+    networks:
+      - application_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.device.rule=Host(`device.localhost`) || PathPrefix(`/device`)"
+      - "traefik.http.middlewares.device-strip.stripprefix.prefixes=/device"
+      - "traefik.http.services.device.loadbalancer.server.port=8081"
+    deploy:
+      replicas: 2
+
+  monitoring_and_communication:
+    image: m16
+    build:
+      context: ./spring-measurements
+      dockerfile: ./Dockerfile
+    environment:
+      DB_IP: measurement_management_db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: root
+      DB_DBNAME: measurement
+    depends_on:
+      - measurement_management_db
+    labels:
+      - "traefik.http.routers.measurement.rule=Host(`measurement.localhost`) || PathPrefix(`/measurement`)"
+      - "traefik.http.middlewares.measurement-strip.stripprefix.prefixes=/measurement"
+      - "traefik.http.services.measurement.loadbalancer.server.port=8082"
+    restart: always
+    networks:
+      - application_network
+
+  user_management_db:
+    image: 'postgres:latest'
+    container_name: user_management_db
+    environment:
+      POSTGRES_DB: user
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+    deploy:
+      replicas: 1
+    volumes:
+      - user_management_data:/var/lib/postgresql/data
+    networks:
+      - application_network
+
+  device_management_db:
+    image: 'postgres:latest'
+    container_name: device_management_db
+    environment:
+      POSTGRES_DB: device
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+    ports:
+      - '5434:5432'
+    volumes:
+      - device_management_data:/var/lib/postgresql/data
+    restart: always
+    networks:
+      - application_network
+
+  measurement_management_db:
+    image: 'postgres:latest'
+    container_name: measurement_management_db
+    environment:
+      POSTGRES_DB: measurement
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+    ports:
+      - '5435:5432'
+    volumes:
+      - measurement_management_data:/var/lib/postgresql/data
+    restart: always
+    networks:
+      - application_network
+      
+  reverse-proxy:
+    image: traefik:v3.2
+    command:
+      - --api.insecure=true
+      - --providers.docker
+      - --accesslog=true
+      - --accesslog.filepath=/var/log/traefik/access.log
+      - --log.level=DEBUG
+      - --entrypoints.web.address=:80
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - traefik_logs:/var/log/traefik
+    networks:
+      - application_network
+      
+  frontend:
+    image: front222
+    container_name: frontend
+    build: 
+        ./react-demo
+    restart: always
+    networks:
+      - application_network
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_USER_SERVICE_URL=http://user.localhost
+      - REACT_APP_DEVICE_SERVICE_URL=http://device.localhost
+      - REACT_APP_MEASUREMENT_SERVICE_URL=http://measurement.localhost
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`localhost`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+    deploy:
+      replicas: 1
+      
+volumes:
+  user_management_data:
+  device_management_data:
+  measurement_management_data:
+  traefik_logs:
+
+networks:
+  application_network:
+    driver: bridge
